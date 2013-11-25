@@ -109,87 +109,30 @@ while True:
             return area == 0 or hullArea/area <= 1.3
 
         contours = filter(filterFunc, contours)
-        eyes = []
 
         imCont = np.zeros((diffCont.shape[0], diffCont.shape[1], 3), dtype=np.uint8)
         cv2.drawContours(imCont, contours, -1, (255, 255, 255))
 
-        cv2.imshow('imCont', imCont)
-        cv2.imshow('diff', diffThresh)
-   
-        cv2.imshow('stereo', imboth)
     
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord(' '):
         eyeBoxSize = 30
         for c in contours:
             moments = cv2.moments(c)
             if moments['m00'] > 0:
-                x, y = moments['m10']/moments['m00'], moments['m01']/moments['m00']
+                x, y = int(moments['m10']/moments['m00']), int(moments['m01']/moments['m00'])
                 half = int(eyeBoxSize/2)
                 roi = im2[y-half:y+half, x-half:x+half]
                 if roi.size == eyeBoxSize*eyeBoxSize:
-                    eyes.append(roi.copy())
-
-        if len(eyes) > 0:
-            sidey = int(math.ceil(math.sqrt(len(eyes))))
-            sidex = int(math.floor(math.sqrt(len(eyes)) + 0.5))
-            fill = sidex*sidey - len(eyes)
-            
-            clicked = np.zeros((sidey, sidex), dtype=np.uint8)
-
-            def onClick(event, x, y, flags, param):
-                ix = math.floor(x/eyeBoxSize)
-                iy = math.floor(y/eyeBoxSize)
-                if event == cv2.EVENT_FLAG_LBUTTON:
-                    clicked[iy][ix] = 1 
-                elif event == cv2.EVENT_FLAG_RBUTTON:
-                    clicked[iy][ix] = 0 
-
-            allEyeImgs = list(grouper(sidex, eyes, np.zeros((eyeBoxSize, eyeBoxSize), dtype=np.uint8)))
-
-            alleyes = np.concatenate([np.concatenate(row, axis=1) for row in allEyeImgs], axis=0)
-            alleyes = cv2.cvtColor(alleyes, cv.CV_GRAY2BGR)
-
-            for y in xrange(sidey):
-                for x in xrange(sidex):
-                    label = np.dot(svm.w, svm.scale * (np.reshape(allEyeImgs[y][x], eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
-                    if label < 0:
-                        clicked[y][x] = 1
-
-            cv2.setMouseCallback('roi', onClick)
+                    label = np.dot(svm.w, svm.scale * (np.reshape(roi, eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
+                    if label <= 0:
+                        cv2.rectangle(imboth, (x-half, y-half), (x+half, y+half), (255, 0, 0), 2)
         
-            while True:
-                displayAllEyes = alleyes.copy()
-                for y in xrange(sidey):
-                    for x in xrange(sidex):
-                        if clicked[y][x] == 1:
-                            cv2.rectangle(displayAllEyes, (x*eyeBoxSize, y*eyeBoxSize), ((x+1)*eyeBoxSize, (y+1)*eyeBoxSize), (255, 0, 0), 2)
-                cv2.imshow('roi', displayAllEyes)
-                innerKey = cv2.waitKey(1) & 0xFF 
-                if innerKey == ord(' '):
-                    numPos = 0
-                    numNeg = 0
-                    tstr = time.strftime('%Y%m%dT%H%M%S', time.gmtime())
-
-                    for y in xrange(sidey):
-                        for x in xrange(sidex):
-                            if clicked[y][x] == 1:
-                                cv2.imwrite('SVM_Data/pos/%s-P%03d.png' % (tstr, numPos), allEyeImgs[y][x])
-                                numPos += 1 
-                            else:
-                                cv2.imwrite('SVM_Data/neg/%s-N%03d.png' % (tstr, numNeg), allEyeImgs[y][x])
-                                numNeg += 1
-
-                    break
-
-                elif innerKey == ord('q'):
-                    break
-       
-        
-
-    if key == ord('q'):
-        break
+        cv2.imshow('imCont', imCont)
+        cv2.imshow('diff', diffThresh)
+   
+        cv2.imshow('stereo', imboth)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
     
     past = imgs
 
