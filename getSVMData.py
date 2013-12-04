@@ -4,12 +4,22 @@ from __future__ import division
 
 import cv,cv2
 import numpy as np
+from numpy import linalg as LA
 import time
 import itertools
 import math
 
 import svm
 
+from svmcv import SVMCV
+
+def rbf_kernel(a, b, sigma):
+    print np.exp(-(1/(2*sigma*sigma))*(LA.norm(a - b)*LA.norm(a - b)))
+    return np.exp(-(1/(2*sigma*sigma))*(LA.norm(a - b)*LA.norm(a - b)))
+
+def kernel(a, b):
+    #return rbf_kernel(a, b, 0.5)
+    return np.dot(a, b)
 
 def grouper(n, iterable, fillvalue=None):
     "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
@@ -51,8 +61,9 @@ def grabImgs(cams):
 face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
 eye_cascade  = cv2.CascadeClassifier('haarcascade_eye.xml')
 
+eyeBoxSize = 50
 
-minThreshold = 30;
+minThreshold = 79;
 maxThreshold = 255;
 def setMinThreshold(args):
     global minThreshold
@@ -61,10 +72,10 @@ def setMaxThreshold(args):
     global maxThreshold
     maxThreshold = args
 
-cv2.namedWindow('diff')
+cv2.namedWindow('imCont')
 cv2.namedWindow('roi')
-cv.CreateTrackbar('min threshold', 'diff', minThreshold, 255, setMinThreshold) 
-cv.CreateTrackbar('max threshold', 'diff', maxThreshold, 255, setMaxThreshold) 
+cv.CreateTrackbar('min threshold', 'imCont', minThreshold, 255, setMinThreshold) 
+cv.CreateTrackbar('max threshold', 'imCont', maxThreshold, 255, setMaxThreshold) 
 
 #cams = [ cv2.VideoCapture(1) ]
 cams = [ cv2.VideoCapture(1), cv2.VideoCapture(0) ]
@@ -104,15 +115,29 @@ while True:
 
         def filterFunc(c):
             hull = cv2.convexHull(c)
-            area = cv2.contourArea(c)
-            hullArea = cv2.contourArea(hull)
-            return area == 0 or hullArea/area <= 1.3
+            arcLen = cv2.arcLength(c, True)
+            hullArcLen = cv2.arcLength(hull, True)
+            #area = cv2.contourArea(c)
+            #hullArea = cv2.contourArea(hull)
+            #return area == 0 or hullArea/area <= 1.00000000001
+            return hullArcLen == 0 or arcLen/hullArcLen <= 1.2
 
         contours = filter(filterFunc, contours)
         eyes = []
 
         imCont = np.zeros((diffCont.shape[0], diffCont.shape[1], 3), dtype=np.uint8)
         cv2.drawContours(imCont, contours, -1, (255, 255, 255))
+
+        for c in contours:
+            moments = cv2.moments(c)
+            if moments['m00'] > 0:
+                x, y = int(moments['m10']/moments['m00']), int(moments['m01']/moments['m00'])
+                half = int(eyeBoxSize/2)
+                roi = im2[y-half:y+half, x-half:x+half]
+                if roi.size == eyeBoxSize*eyeBoxSize:
+                    label = kernel(svm.w, svm.scale * (np.reshape(roi, eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
+                    if label <= 0:
+                        cv2.rectangle(imboth, (x-half, y-half), (x+half, y+half), (255, 0, 0), 2)
 
         cv2.imshow('imCont', imCont)
         cv2.imshow('diff', diffThresh)
@@ -121,7 +146,6 @@ while True:
     
     key = cv2.waitKey(1) & 0xFF
     if key == ord(' '):
-        eyeBoxSize = 30
         for c in contours:
             moments = cv2.moments(c)
             if moments['m00'] > 0:
@@ -153,7 +177,7 @@ while True:
 
             for y in xrange(sidey):
                 for x in xrange(sidex):
-                    label = np.dot(svm.w, svm.scale * (np.reshape(allEyeImgs[y][x], eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
+                    label = kernel(svm.w, svm.scale * (np.reshape(allEyeImgs[y][x], eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
                     if label < 0:
                         clicked[y][x] = 1
 

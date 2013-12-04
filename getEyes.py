@@ -10,7 +10,6 @@ import math
 
 import svm
 
-
 def grouper(n, iterable, fillvalue=None):
     "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
     args = [iter(iterable)] * n
@@ -45,14 +44,14 @@ def grabImgs(cams):
 
     return (success, imgs, states)
 
-
+ 
+eyeBoxSize = 50 
 
 
 face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
 eye_cascade  = cv2.CascadeClassifier('haarcascade_eye.xml')
 
-
-minThreshold = 30;
+minThreshold = 79;
 maxThreshold = 255;
 def setMinThreshold(args):
     global minThreshold
@@ -113,8 +112,6 @@ while True:
         imCont = np.zeros((diffCont.shape[0], diffCont.shape[1], 3), dtype=np.uint8)
         cv2.drawContours(imCont, contours, -1, (255, 255, 255))
 
-    
-        eyeBoxSize = 30
         for c in contours:
             moments = cv2.moments(c)
             if moments['m00'] > 0:
