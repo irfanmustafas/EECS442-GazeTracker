@@ -2,6 +2,7 @@
 
 from __future__ import division
 
+import sys
 import cv,cv2
 import numpy as np
 import time
@@ -37,7 +38,6 @@ def setGlintThreshold(args):
     glintThreshold = args
 
 cv2.namedWindow('diff')
-cv2.namedWindow('roi')
 cv2.namedWindow('stereo')
 cv.CreateTrackbar('min threshold', 'diff', minThreshold, 255, setMinThreshold) 
 cv.CreateTrackbar('max threshold', 'diff', maxThreshold, 255, setMaxThreshold) 
@@ -51,7 +51,12 @@ for c in cams:
     c.set(cv.CV_CAP_PROP_FPS, 30)
     c.set(cv.CV_CAP_PROP_MODE, 4)
 
+rows = 5
+cols = 5
+idx = 0
 while True:
+    if idx >= rows*cols:
+        idx = 0
     err = False
 
     err, past, s1 = grabImgs(cams)
@@ -85,32 +90,59 @@ while True:
         imboth = cv2.cvtColor(imboth, cv.CV_GRAY2BGR)
 
         eyeContours = np.zeros([2*int(eyeBoxSize/4), 0])
+        
+        PGVec = None
+        a = [1991.84497391609,          179.411657101141,          54.3120306665886,         -10.0490343626226]
+        b = [866.678760695169,          12.4457927037187,          1.41920775842972,         -15.9284542907887]
+        #a = [1181.27159334425,         -27.8170122339234,         -211.926175603169,          13.5983541740038]
+        #b = [3243.55717250692,         -34.9302611083195,          -522.08544499765,          25.1726262422174]
 
+        mainPupil = None
+        mainGlint = None
+        minDist = sys.maxint
+        mainBox = None
         for c in contours:
             (pos, eye) = getEye(im, c, eyeBoxSize)
             if eye != None:
-                x, y = pos[0], pos[1]
+                x, y = int(pos[0]), int(pos[1])
                 half = int(eyeBoxSize/2)
                 label = np.dot(svm.w, svm.scale * (np.reshape(eye, eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
                 if label <= 0:
                     pupil, pCont = getCircle(eye, pupilThreshold)
 
-                    cv2.rectangle(imboth, (x-half, y-half), (x+half, y+half), (255, 255, 255), 2)
+                    #cv2.rectangle(imboth, (x-half, y-half), (x+half, y+half), (255, 255, 255), 2)
                     if pupil != None:
-                        darkEye = im2[y-half+pupil[1]-int(eyeBoxSize/4):y-half+pupil[1]+int(eyeBoxSize/4), x-half+pupil[0]-int(eyeBoxSize/4):x-half+pupil[0]+int(eyeBoxSize/4)]
+                        darkEye = im2[y-half+int(pupil[1])-int(eyeBoxSize/4):y-half+int(pupil[1])+int(eyeBoxSize/4), x-half+int(pupil[0])-int(eyeBoxSize/4):x-half+int(pupil[0])+int(eyeBoxSize/4)]
                         if darkEye.size != math.pow(2*int(eyeBoxSize/4),2):
                             continue
-                        glint, gCont = getCircle(darkEye, glintThreshold)
+                        glint, gCont = getGlint(darkEye, pupil, glintThreshold, eyeBoxSize)
 
                         imGlint = np.zeros([2*int(eyeBoxSize/4), 2*int(eyeBoxSize/4)])
                         cv2.drawContours(imGlint, gCont, -1, (255, 255, 255))
                         eyeContours = np.concatenate([eyeContours, imGlint], axis=1)
 
-                        cv2.circle(imboth, (x-half+pupil[0], y-half+pupil[1]), 7, (0, 255, 0))
-                        if glint != None:
-                            cv2.circle(imboth, (x-int(eyeBoxSize/4)+glint[0], y-int(eyeBoxSize/4)+glint[1]), 3, (0, 0, 255))
+                        #cv2.circle(imboth, (x-half+int(pupil[0]), y-half+int(pupil[1])), 7, (0, 255, 0))
+                        dist = math.sqrt(math.pow(360 - (x-half+int(pupil[0])), 2) + math.pow(240 - (y-half+int(pupil[1])), 2))
+                        if dist < minDist:
+                            if glint != None:
+                                mainPupil = (x-half+pupil[0], y-half+pupil[1])
+                                mainGlint = (x-int(eyeBoxSize/4)+glint[0], y-int(eyeBoxSize/4)+glint[1])
+                                mainBox = (x-half, y-half), (x+half, y+half)
+                                #cv2.circle(imboth, (x-int(eyeBoxSize/4)+int(glint[0]), y-int(eyeBoxSize/4)+int(glint[1])), 3, (0, 0, 255))
         
-        cv2.imshow('imCont', imCont)
+        if mainPupil != None and mainGlint != None:
+            PGVec = (mainPupil[0] - mainGlint[0], mainPupil[1] - mainGlint[1])
+            cv2.circle(imboth, (int(mainPupil[0]), int(mainPupil[1])), 7, (0, 255, 0))
+            cv2.circle(imboth, (int(mainGlint[0]), int(mainGlint[1])), 3, (0, 0, 255))
+            cv2.rectangle(imboth, mainBox[0], mainBox[1], (255, 255, 255), 2)
+
+        calib, coord = makeCalibrationImage(1920, 1080, rows, cols, idx)
+        if PGVec != None:
+            xg = a[0] + a[1]*PGVec[0] + a[2]*PGVec[1] + a[3]*PGVec[0]*PGVec[1]
+            yg = b[0] + b[1]*PGVec[0] + b[2]*PGVec[1] + b[3]*PGVec[1]*PGVec[1]
+            cv2.circle(calib, (int(xg), int(yg)), 3, (255, 255, 255), -1)
+        cv2.imshow('calib', calib)
+        #cv2.imshow('imCont', imCont)
         cv2.imshow('diff', diffThresh)
    
         cv2.imshow('stereo', imboth)
@@ -119,6 +151,11 @@ while True:
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
+        if key == ord(' '):
+            if PGVec != None:
+                print PGVec[0], PGVec[1], coord[0], coord[1]
+        if key == ord('n'):
+            idx += 1
     
     past = imgs
 

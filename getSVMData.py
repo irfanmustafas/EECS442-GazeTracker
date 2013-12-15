@@ -6,62 +6,18 @@ import cv,cv2
 import numpy as np
 from numpy import linalg as LA
 import time
-import itertools
 import math
 
+from helper import *
 import svm
 
-from svmcv import SVMCV
-
-def rbf_kernel(a, b, sigma):
-    print np.exp(-(1/(2*sigma*sigma))*(LA.norm(a - b)*LA.norm(a - b)))
-    return np.exp(-(1/(2*sigma*sigma))*(LA.norm(a - b)*LA.norm(a - b)))
-
-def kernel(a, b):
-    #return rbf_kernel(a, b, 0.5)
-    return np.dot(a, b)
-
-def grouper(n, iterable, fillvalue=None):
-    "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
-    args = [iter(iterable)] * n
-    return itertools.izip_longest(fillvalue=fillvalue, *args)
-
-
-def grabImgs(cams):
-    imgs = []
-    states = []
-    success = True
-    for c in cams:
-        ret, f = c.read()
-
-        if not ret:
-            success = False
-            break
-
-        states.append(f[0][0])
-        f = cv2.flip(f, 1)
-
-        #grey = f.copy()
-        #f = cv2.cvtColor(f, cv.CV_GRAY2BGR)
-        #grey = cv2.equalizeHist(grey)
-
-        """
-        faces = face_cascade.detectMultiScale(grey, scaleFactor=1.3, minNeighbors=4, minSize=(30, 30), flags = cv.CV_HAAR_SCALE_IMAGE)
-        for (x,y,w,h) in faces:
-            cv2.rectangle(f, (x,y), (x+w,y+h), (200,150,0), 2)
-        """
-
-        imgs.append(f)
-
-    return (success, imgs, states)
-
-
+#from svmcv import SVMCV
 
 
 face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
 eye_cascade  = cv2.CascadeClassifier('haarcascade_eye.xml')
 
-eyeBoxSize = 50
+eyeBoxSize = 70
 
 minThreshold = 79;
 maxThreshold = 255;
@@ -87,13 +43,13 @@ for c in cams:
 while True:
     err = False
 
-    err, imgs, s1 = grabImgs(cams)
-    err, past, s2 = grabImgs(cams)
+    err, past, s1 = grabImgs(cams)
+    err, imgs, s2 = grabImgs(cams)
     
     if s1[0] & 0x20:
-        light, dark = past, imgs
-    else:
         light, dark = imgs, past
+    else:
+        light, dark = past, imgs
 
     if len(past) == len(imgs):
         both = zip(past, imgs)
@@ -106,38 +62,24 @@ while True:
       
         imboth = np.concatenate((im, im2), axis=0)
 
-
         diffThresh = cv2.inRange(diffStereo, minThreshold, maxThreshold)
         diffThresh = cv2.dilate(diffThresh, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4)))
         diffCont = diffThresh.copy()
         #diffThresh = cv2.adaptiveThreshold(diffStereo, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 7, maxThreshold)
         contours, hier = cv2.findContours(diffCont, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
-        def filterFunc(c):
-            hull = cv2.convexHull(c)
-            arcLen = cv2.arcLength(c, True)
-            hullArcLen = cv2.arcLength(hull, True)
-            #area = cv2.contourArea(c)
-            #hullArea = cv2.contourArea(hull)
-            #return area == 0 or hullArea/area <= 1.00000000001
-            return hullArcLen == 0 or arcLen/hullArcLen <= 1.2
-
-        contours = filter(filterFunc, contours)
-        eyes = []
+        contours = filter(contourFilterFunc, contours)
 
         imCont = np.zeros((diffCont.shape[0], diffCont.shape[1], 3), dtype=np.uint8)
         cv2.drawContours(imCont, contours, -1, (255, 255, 255))
 
+        half = int(eyeBoxSize/2)
         for c in contours:
-            moments = cv2.moments(c)
-            if moments['m00'] > 0:
-                x, y = int(moments['m10']/moments['m00']), int(moments['m01']/moments['m00'])
-                half = int(eyeBoxSize/2)
-                roi = im2[y-half:y+half, x-half:x+half]
-                if roi.size == eyeBoxSize*eyeBoxSize:
-                    label = kernel(svm.w, svm.scale * (np.reshape(roi, eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
-                    if label <= 0:
-                        cv2.rectangle(imboth, (x-half, y-half), (x+half, y+half), (255, 0, 0), 2)
+            (pos, eye) = getEye(im, c, eyeBoxSize)
+            if eye != None:
+                label = kernel(svm.w, svm.scale * (np.reshape(eye, eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
+                if label <= 0:
+                    cv2.rectangle(imboth, (pos[0]-half, pos[1]-half), (pos[0]+half, pos[1]+half), (255, 0, 0), 2)
 
         cv2.imshow('imCont', imCont)
         cv2.imshow('diff', diffThresh)
@@ -146,29 +88,28 @@ while True:
     
     key = cv2.waitKey(1) & 0xFF
     if key == ord(' '):
+        eyes = []
         for c in contours:
-            moments = cv2.moments(c)
-            if moments['m00'] > 0:
-                x, y = moments['m10']/moments['m00'], moments['m01']/moments['m00']
-                half = int(eyeBoxSize/2)
-                roi = im2[y-half:y+half, x-half:x+half]
-                if roi.size == eyeBoxSize*eyeBoxSize:
-                    eyes.append(roi.copy())
+            (pos, eye) = getEye(im, c, eyeBoxSize)
+            if eye != None:
+                eyes.append(eye)
 
         if len(eyes) > 0:
             sidey = int(math.ceil(math.sqrt(len(eyes))))
             sidex = int(math.floor(math.sqrt(len(eyes)) + 0.5))
             fill = sidex*sidey - len(eyes)
             
-            clicked = np.zeros((sidey, sidex), dtype=np.uint8)
+            clicked = np.zeros((sidey, sidex), dtype=np.int8)
 
             def onClick(event, x, y, flags, param):
                 ix = math.floor(x/eyeBoxSize)
                 iy = math.floor(y/eyeBoxSize)
                 if event == cv2.EVENT_FLAG_LBUTTON:
-                    clicked[iy][ix] = 1 
+                    if clicked[iy][ix] < 1:
+                        clicked[iy][ix] += 1
                 elif event == cv2.EVENT_FLAG_RBUTTON:
-                    clicked[iy][ix] = 0 
+                    if clicked[iy][ix] > -1:
+                        clicked[iy][ix] += -1
 
             allEyeImgs = list(grouper(sidex, eyes, np.zeros((eyeBoxSize, eyeBoxSize), dtype=np.uint8)))
 
@@ -177,6 +118,9 @@ while True:
 
             for y in xrange(sidey):
                 for x in xrange(sidex):
+                    if np.amin(allEyeImgs[y][x]) == np.amax(allEyeImgs[y][x]):
+                        clicked[y][x] = -1
+                        continue
                     label = kernel(svm.w, svm.scale * (np.reshape(allEyeImgs[y][x], eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
                     if label < 0:
                         clicked[y][x] = 1
@@ -187,8 +131,12 @@ while True:
                 displayAllEyes = alleyes.copy()
                 for y in xrange(sidey):
                     for x in xrange(sidex):
-                        if clicked[y][x] == 1:
-                            cv2.rectangle(displayAllEyes, (x*eyeBoxSize, y*eyeBoxSize), ((x+1)*eyeBoxSize, (y+1)*eyeBoxSize), (255, 0, 0), 2)
+                        if clicked[y][x] > 0:
+                            cv2.rectangle(displayAllEyes, (x*eyeBoxSize, y*eyeBoxSize), ((x+1)*eyeBoxSize-1, (y+1)*eyeBoxSize-1), (0, 255, 0), 1)
+                        elif clicked[y][x] == 0:
+                            cv2.rectangle(displayAllEyes, (x*eyeBoxSize, y*eyeBoxSize), ((x+1)*eyeBoxSize-1, (y+1)*eyeBoxSize-1), (255, 0, 0), 1)
+                        elif clicked[y][x] < 0:
+                            cv2.rectangle(displayAllEyes, (x*eyeBoxSize, y*eyeBoxSize), ((x+1)*eyeBoxSize-1, (y+1)*eyeBoxSize-1), (0, 0, 255), 1)
                 cv2.imshow('roi', displayAllEyes)
                 innerKey = cv2.waitKey(1) & 0xFF 
                 if innerKey == ord(' '):
@@ -201,7 +149,7 @@ while True:
                             if clicked[y][x] == 1:
                                 cv2.imwrite('SVM_Data/pos/%s-P%03d.png' % (tstr, numPos), allEyeImgs[y][x])
                                 numPos += 1 
-                            else:
+                            elif clicked[y][x] == 0:
                                 cv2.imwrite('SVM_Data/neg/%s-N%03d.png' % (tstr, numNeg), allEyeImgs[y][x])
                                 numNeg += 1
 
@@ -214,6 +162,4 @@ while True:
 
     if key == ord('q'):
         break
-    
-    past = imgs
 
