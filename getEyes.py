@@ -7,44 +7,19 @@ import numpy as np
 import time
 import math
 
+import config
+import eyes
 from helper import *
 import svm
 
 
- 
-eyeBoxSize = 70 
-
-
-face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-eye_cascade  = cv2.CascadeClassifier('haarcascade_eye.xml')
-
-minThreshold = 79;
-maxThreshold = 255;
-def setMinThreshold(args):
-    global minThreshold
-    minThreshold = args
-def setMaxThreshold(args):
-    global maxThreshold
-    maxThreshold = args
-
-pupilThreshold = 65;
-glintThreshold = 240;
-def setPupilThreshold(args):
-    global pupilThreshold
-    pupilThreshold = args
-def setGlintThreshold(args):
-    global glintThreshold
-    glintThreshold = args
-
-cv2.namedWindow('diff')
-cv2.namedWindow('roi')
+cv2.namedWindow('contours')
 cv2.namedWindow('stereo')
-cv.CreateTrackbar('min threshold', 'diff', minThreshold, 255, setMinThreshold) 
-cv.CreateTrackbar('max threshold', 'diff', maxThreshold, 255, setMaxThreshold) 
-cv.CreateTrackbar('pupil threshold', 'stereo', pupilThreshold, 255, setPupilThreshold) 
-cv.CreateTrackbar('glint threshold', 'stereo', glintThreshold, 255, setGlintThreshold) 
+cv.CreateTrackbar('pupilThresh1Min', 'contours', config.pupilThresh1Min, 255, config.setPupilThresh1Min) 
+cv.CreateTrackbar('pupilThresh1Max', 'contours', config.pupilThresh1Max, 255, config.setPupilThresh1Max) 
+cv.CreateTrackbar('pupil threshold', 'stereo',   config.pupilThresh2Min, 255, config.setPupilThresh2Min) 
+cv.CreateTrackbar('glint threshold', 'stereo',   config.glintThreshMin,  255, config.setGlintThreshMin)
 
-#cams = [ cv2.VideoCapture(1) ]
 cams = [ cv2.VideoCapture(1), cv2.VideoCapture(0) ]
 
 for c in cams:
@@ -52,73 +27,45 @@ for c in cams:
     c.set(cv.CV_CAP_PROP_MODE, 4)
 
 while True:
-    err = False
+    light, dark = grabLightDarkPair(cams)
 
-    err, past, s1 = grabImgs(cams)
-    err, imgs, s2 = grabImgs(cams)
-    
-    if s1[0] & 0x20:
-        light, dark = imgs, past
-    else:
-        light, dark = past, imgs
-
-    if len(past) == len(imgs):
-        both = zip(past, imgs)
-        diffs = []
-        for s in both:
-            diffs.append(cv2.absdiff(s[0], s[1]))
-        diffStereo = np.concatenate(diffs, axis=1)
-        im = np.concatenate(light, axis=1)
-        im2 = np.concatenate(dark, axis=1)
-      
-        diffThresh = cv2.inRange(diffStereo, minThreshold, maxThreshold)
-        diffThresh = cv2.dilate(diffThresh, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4)))
-        diffCont = diffThresh.copy()
-        #diffThresh = cv2.adaptiveThreshold(diffStereo, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 7, maxThreshold)
-        contours, hier = cv2.findContours(diffCont, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-        contours = filter(contourFilterFunc, contours)
-
-        imCont = np.zeros((diffCont.shape[0], diffCont.shape[1], 3), dtype=np.uint8)
-        cv2.drawContours(imCont, contours, -1, (255, 255, 255))
-
-        imboth = np.concatenate((im, im2), axis=0)
+    if light is not None and dark is not None:
+        imboth = np.concatenate((np.concatenate(light, axis=1), np.concatenate(dark, axis=1)), axis=0)
         imboth = cv2.cvtColor(imboth, cv.CV_GRAY2BGR)
 
-        eyeContours = np.zeros([2*int(eyeBoxSize/4), 0])
+        contours = eyes.findBlobs(light, dark)
 
-        for c in contours:
-            (pos, eye) = getEye(im, c, eyeBoxSize)
-            if eye != None:
-                x, y = pos[0], pos[1]
-                half = int(eyeBoxSize/2)
-                label = np.dot(svm.w, svm.scale * (np.reshape(eye, eyeBoxSize*eyeBoxSize, 'F') + svm.shift)) + svm.bias
-                if label <= 0:
-                    pupil, pCont = getCircle(eye, pupilThreshold)
+        eyeContours = np.zeros([2*int(config.eyePatchSize/4), 0])
 
-                    cv2.rectangle(imboth, (x-half, y-half), (x+half, y+half), (255, 255, 255), 2)
-                    if pupil != None:
-                        darkEye = im2[y-half+pupil[1]-int(eyeBoxSize/4):y-half+pupil[1]+int(eyeBoxSize/4), x-half+pupil[0]-int(eyeBoxSize/4):x-half+pupil[0]+int(eyeBoxSize/4)]
-                        if darkEye.size != math.pow(2*int(eyeBoxSize/4),2):
-                            continue
-                        glint, gCont = getCircle(darkEye, glintThreshold)
+        for cam in range(len(light)):
+            for c in contours[cam]:
+                (pos, eye) = eyes.getEyePatch(light[cam], c)
+                if eye != None:
+                    x, y = pos[0], pos[1]
+                    half = int(config.eyePatchSize / 2)
+                    label = np.dot(svm.w, svm.scale * (np.reshape(eye, config.eyePatchSize*config.eyePatchSize, 'F') + svm.shift)) + svm.bias
+                    if label <= 0:
+                        pupil, pCont = eyes.getCircle(eye, config.pupilThresh2Min)
 
-                        imGlint = np.zeros([2*int(eyeBoxSize/4), 2*int(eyeBoxSize/4)])
-                        cv2.drawContours(imGlint, gCont, -1, (255, 255, 255))
-                        eyeContours = np.concatenate([eyeContours, imGlint], axis=1)
+                        cv2.rectangle(imboth, (int(x-half), int(y-half)), (int(x+half), int(y+half)), (255, 255, 255), 2)
+                        if pupil != None:
+                            darkEye = dark[cam][y-half+pupil[1]-int(config.eyePatchSize/4):y-half+pupil[1]+int(config.eyePatchSize/4), x-half+pupil[0]-int(config.eyePatchSize/4):x-half+pupil[0]+int(config.eyePatchSize/4)]
+                            if darkEye.size != math.pow(2*int(config.eyePatchSize/4),2):
+                                continue
+                            glint, gCont = eyes.getCircle(darkEye, config.glintThreshMin)
 
-                        cv2.circle(imboth, (x-half+pupil[0], y-half+pupil[1]), 7, (0, 255, 0))
-                        if glint != None:
-                            cv2.circle(imboth, (x-int(eyeBoxSize/4)+glint[0], y-int(eyeBoxSize/4)+glint[1]), 3, (0, 0, 255))
+                            imGlint = np.zeros([2*int(config.eyePatchSize/4), 2*int(config.eyePatchSize/4)])
+                            cv2.drawContours(imGlint, gCont, -1, (255, 255, 255))
+                            eyeContours = np.concatenate([eyeContours, imGlint], axis=1)
+
+                            cv2.circle(imboth, (int(x-half+pupil[0]), int(y-half+pupil[1])), 7, (0, 255, 0))
+                            if glint != None:
+                                cv2.circle(imboth, (int(x-int(config.eyePatchSize/4)+glint[0]), int(y-int(config.eyePatchSize/4)+glint[1])), 3, (0, 0, 255))
         
-        cv2.imshow('imCont', imCont)
-        cv2.imshow('diff', diffThresh)
-   
         cv2.imshow('stereo', imboth)
         if eyeContours.shape[1] != 0:
             cv2.imshow('eyes', eyeContours)
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
-    
-    past = imgs
 

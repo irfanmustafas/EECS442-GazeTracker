@@ -18,8 +18,8 @@ cv2.namedWindow('contours')
 cv2.namedWindow('stereo')
 cv.CreateTrackbar('pupilThresh1Min', 'contours', config.pupilThresh1Min, 255, config.setPupilThresh1Min) 
 cv.CreateTrackbar('pupilThresh1Max', 'contours', config.pupilThresh1Max, 255, config.setPupilThresh1Max) 
-#cv.CreateTrackbar('pupil threshold', 'stereo',   config.pupilThresh2Min, 255, config.setPupilThresh2Min) 
-#cv.CreateTrackbar('glint threshold', 'stereo',   config.glintThreshMin,  255, config.setGlintThreshMin)
+cv.CreateTrackbar('pupil threshold', 'stereo',   config.pupilThresh2Min, 255, config.setPupilThresh2Min) 
+cv.CreateTrackbar('glint threshold', 'stereo',   config.glintThreshMin,  255, config.setGlintThreshMin)
 
 #cams = [ cv2.VideoCapture(1), cv2.VideoCapture(0) ]
 cams = [ cv2.VideoCapture(1) ]
@@ -28,6 +28,10 @@ for c in cams:
     c.set(cv.CV_CAP_PROP_FPS, 30)
     c.set(cv.CV_CAP_PROP_MODE, 4)
 
+config.calibRows = 3
+config.calibCols = 3
+config.calibPadX = 500
+
 idx = 0
 while True:
     if idx >= config.calibRows * config.calibCols:
@@ -35,6 +39,8 @@ while True:
 
     light, dark = grabLightDarkPair(cams)
 
+    xg = 0
+    yg = 0
     if light is not None and dark is not None:
         imboth = np.concatenate((np.concatenate(light, axis=1), np.concatenate(dark, axis=1)), axis=0)
         imboth = cv2.cvtColor(imboth, cv.CV_GRAY2BGR)
@@ -42,12 +48,10 @@ while True:
         contours = eyes.findBlobs(light, dark)
         pupilGlintVectors = eyes.findEyes(light, dark, contours, imboth)
 
-        a = [1438.8497483032,          245.754013157552,          21.1839369576548,          16.8707657712166]
-        b = [1480.93392967789,         -2.47110909538142,          326.671102334977,          20.7502568126427]
-        #a = [1991.84497391609,          179.411657101141,          54.3120306665886,         -10.0490343626226]
-        #b = [866.678760695169,          12.4457927037187,          1.41920775842972,         -15.9284542907887]
-        #a = [1181.27159334425,         -27.8170122339234,         -211.926175603169,          13.5983541740038]
-        #b = [3243.55717250692,         -34.9302611083195,          -522.08544499765,          25.1726262422174]
+        a = [1331.69686664106,          155.826667674478,          12.5058155518627,         0.115714055393919]
+        b = [986.491070530726,         -4.34345175043888,          37.2399368190665,         -13.1839520610278]
+        #a = [1438.8497483032,          245.754013157552,          21.1839369576548,          16.8707657712166]
+        #b = [1480.93392967789,         -2.47110909538142,          326.671102334977,          20.7502568126427]
 
         calib, coord = makeCalibrationImage(1920, 1080, idx)
         for cam in range(len(cams)):
@@ -64,9 +68,7 @@ while True:
         if key == ord('q'):
             break
         if key == ord(' '):
-            pgv = pupilGlintVectors[0]
-            if len(pgv) != 0:
-                print pgv[0][0], pgv[0][1], coord[0], coord[1]
+            print xg, yg, coord[0], coord[1], math.sqrt(math.pow(xg-coord[0],2) + math.pow(yg-coord[1],2))
         if key == ord('n'):
             idx += 1
 

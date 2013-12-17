@@ -19,6 +19,8 @@ cv2.namedWindow('stereo')
 cv2.namedWindow('roi')
 cv.CreateTrackbar('pupilThresh1Min', 'contours', config.pupilThresh1Min, 255, config.setPupilThresh1Min) 
 cv.CreateTrackbar('pupilThresh1Max', 'contours', config.pupilThresh1Max, 255, config.setPupilThresh1Max) 
+cv.CreateTrackbar('pupil threshold', 'stereo',   config.pupilThresh2Min, 255, config.setPupilThresh2Min) 
+cv.CreateTrackbar('glint threshold', 'stereo',   config.glintThreshMin,  255, config.setGlintThreshMin)
 
 #cams = [ cv2.VideoCapture(1), cv2.VideoCapture(0) ]
 cams = [ cv2.VideoCapture(1) ]
@@ -27,6 +29,8 @@ for c in cams:
     c.set(cv.CV_CAP_PROP_FPS, 30)
     c.set(cv.CV_CAP_PROP_MODE, 4)
 
+svmCorrect = 0
+svmError = 0
 while True:
     light, dark = grabLightDarkPair(cams)
 
@@ -86,6 +90,8 @@ while True:
                     label = kernel(svm.w, svm.scale * (np.reshape(allEyeImgs[y][x], config.eyePatchSize*config.eyePatchSize, 'F') + svm.shift)) + svm.bias
                     if label < 0:
                         clicked[y][x] = 1
+                    else:
+                        clicked[y][x] = -1
 
             cv2.setMouseCallback('roi', onClick)
         
@@ -102,24 +108,22 @@ while True:
                 cv2.imshow('roi', displayAllEyes)
                 innerKey = cv2.waitKey(1) & 0xFF 
                 if innerKey == ord(' '):
-                    numPos = 0
-                    numNeg = 0
                     tstr = time.strftime('%Y%m%dT%H%M%S', time.gmtime())
 
                     for y in xrange(sidey):
                         for x in xrange(sidex):
-                            if clicked[y][x] == 1:
-                                cv2.imwrite('SVM_Data/pos/%s-P%03d.png' % (tstr, numPos), allEyeImgs[y][x])
-                                numPos += 1 
-                            elif clicked[y][x] == -1:
-                                cv2.imwrite('SVM_Data/neg/%s-N%03d.png' % (tstr, numNeg), allEyeImgs[y][x])
-                                numNeg += 1
+                            if np.amin(allEyeImgs[y][x]) == np.amax(allEyeImgs[y][x]):
+                                continue
+                            elif clicked[y][x] == 0:
+                                svmError += 1
+                            elif clicked[y][x] == 1 or clicked[y][x] == -1:
+                                svmCorrect += 1 
+                    print svmCorrect, svmError
 
                     break
 
                 elif innerKey == ord('q'):
                     break
-       
         
 
     if key == ord('q'):
