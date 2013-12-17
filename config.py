@@ -1,7 +1,7 @@
 import cv,cv2
 
 showContours = True
-showEyes = False
+showEyes = True
 
 calibRows = 5
 calibCols = 5

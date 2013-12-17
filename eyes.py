@@ -72,9 +72,9 @@ def findEyes(light, dark, contours, imboth):
                         darkEye = normalizeImage(darkEye)
                         glint = getGlint(darkEye)
 
-                        #imGlint = np.zeros([2*quarter, 2*quarter])
-                        #cv2.drawContours(imGlint, gCont, -1, (255, 255, 255))
-                        #eyeContours = np.concatenate([eyeContours, imGlint], axis=1)
+                        if glint is not None:
+                            cv2.circle(imboth, (int(x-half+pupil[0]), int(y-half+pupil[1])), 7, (0, 255, 0))
+                            cv2.circle(imboth, (int(x-half+pupil[0]-quarter+glint[0]), int(y-half+pupil[1]-quarter+glint[1])), 3, (0, 0, 255))
 
                         dist = math.sqrt(math.pow(360 - (x-half+int(pupil[0])), 2) + math.pow(240 - (y-half+int(pupil[1])), 2))
                         if dist < minDist and glint is not None:
@@ -82,14 +82,13 @@ def findEyes(light, dark, contours, imboth):
                             mainPupil = (x-half+pupil[0], y-half+pupil[1])
                             mainGlint = (mainPupil[0]-quarter+glint[0], mainPupil[1]-quarter+glint[1])
                             mainBox = (x-half, y-half), (x+half, y+half)
-                            #cv2.circle(imboth, (x-int(config.eyePatchSize/4)+int(glint[0]), y-int(config.eyePatchSize/4)+int(glint[1])), 3, (0, 0, 255))
         
         if mainPupil is not None and mainGlint is not None:
             PGVec.append((mainPupil[0] - mainGlint[0], mainPupil[1] - mainGlint[1]))
             if config.showEyes:
                 cv2.circle(imboth, (int(mainPupil[0]), int(mainPupil[1])), 7, (0, 255, 0))
                 cv2.circle(imboth, (int(mainGlint[0]), int(mainGlint[1])), 3, (0, 0, 255))
-                cv2.rectangle(imboth, mainBox[0], mainBox[1], (0, 255, 0), 2)
+                #cv2.rectangle(imboth, mainBox[0], mainBox[1], (0, 255, 0), 2)
 
         pupilGlintVectors.append(PGVec)
 
